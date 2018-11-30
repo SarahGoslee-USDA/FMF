@@ -1,0 +1,230 @@
+---
+title: "R Model Interface"
+date: "`r Sys.Date()`"
+author: "Sarah Goslee"
+output: pdf_document
+geometry: margin=1in
+---
+
+# Introduction
+
+Objectives:
+
+1. Implement a general-purpose toolset for reading and writing text files with complex formatting requirements.
+2. Create definitions for the input and output files for APEX 1605 (update-20170208T205310Z).
+
+
+There are some functions in `outputextraction` that were adapted for a different project. These adaptations need to be generalized and folded into existing codebase.
+
+
+## General approach
+
+This package uses nested R list objects to describe arbitrary text file formats. Each file has a `desc` list object describing each section's format and contents. The `desc` can be used to read and write data files.
+
+## Versioning
+
+As of 2018-10-09, I'm working from the APEX User's Manual v. 1501 (December 2016), with the updates in the User's Manual addendum for APEX 1605, and confirming with the files distributed with APEX 1605 (update-20170208T205310Z).
+
+### Assumptions
+
+Implementation requires a series of assumptions and postulates:
+
+- can have fixed and free-form fields within a row
+- a row of a particular format can be repeated one or more times within a section
+- a file can have any number of sections
+    - each section contains rows of only one format
+- assumption: free-form fields are at the end of lines (position X to end)"
+- assumption: sections with indeterminate numbers of rows are at the end of files (line X to end)
+- assumption: blank line marks end of file; anything after is ignored
+    - also need to be able to specify a terminator lines
+
+### `desc` format
+
+The `desc` description of a file includes:
+
+- 0 or more header sections, named header1, header2, etc, each with a separate section description
+- 1 or more body sections, which can be repeated a fixed or indefinite number of times
+- 1 terminal row, stored as a character vector, which denotes the end of the file
+  - by default, this is a newline
+- A doc string describing the file as a whole
+
+### `section` format
+
+The `section` description includes the necessary information to read and write a single line of a file correctly. This includes:
+
+- rlength: the field length for fixed-width files; NA for free-format (delimited)
+- rfmt: the field format: "c" for character, "i" for integer, or number of decimal places
+- rjust: justification of the datum within the field, "r" or "l"
+  - default is characters are left-justified; numbers are right justified
+- times: >= 1; the number of times a row of that format appears in the file
+  - if times is NA, that row is repeated indefinitely until the terminator
+- rnames: optional; character vector containing the field names for this section
+- rdoc: optional; doc string for this section
+- rfielddoc: optional; character vector containing the documentation for each field
+
+## Functions
+
+- make.fields: given a vector of lengths, calculate the start and end positions of fixed-width fields
+- make.flen: given matrix or vectors of start and end positions, calculate lengths of fixed-width fields
+
+- make.fmt: guess at descriptive format of a character vector
+- make.section: assemble the description for a single row of a complex text file
+- make.desc: assemble the individual rows into a description object for a complex text file
+
+- print.section: display the key elements of a section as a data frame
+
+- read.fmt: read a fixed-format file into a R list given a description object
+- read.row: read a single row (called by read.fmt)
+
+- check.constraints: if a desc object has value constraints, check them for an object
+
+- write.fmt: write a R list into a text file following a description object
+- write.row: write a single row (called by write.fmt)
+
+- scurvy: plot S-curve for parameters p1 and p2
+- s19: extract coefficients for 10% and 90% from a scurvy plot and format them APEX-style
+
+
+
+```{r setup, echo=FALSE}
+	# basics
+	source("code/session.rbat")
+```
+
+# Example
+
+This is a toy example with two sections, a header and a body. The header has an integer in 4 columns and a character. 
+The body has four fixed-width columns of different sizes, containing a character, an integer, and two floats, and can consist of any number of rows. The integer can only be in the set c(1, 2, 5), and one of the floats is constrained to the range c(8, 11).  
+
+Note: cval has to be a list, not a vector.
+
+```{r example, echo=TRUE}
+
+    test.desc <- make.desc(
+        make.section(rlength = c(4, NA), rfmt = c("i", "c"), rjust = c("l", "l"), rdoc = "header row", rnames = c("SITE", "NAME"), rfielddoc = c("site number", "site name"), times=1), 
+        make.section(rlength = c(8, 4, 8, 8), rfmt = c("c", "i", 0, 2), times = NA, rnames = c("ID", "Var1", "Var2", "Var3"), rdoc = "fake data", ctype = c("l", "l", "r", NA), cval = list(c("a", "b", "c", "d"), c(1, 2, 5), c(8, 11), NA)),
+        doc = "Example file")
+
+    # look at the format
+    print.section(test.desc, 1)
+    print.section(test.desc, 2)
+
+    # put together some fake data
+    # this could be read from an existing file to start with
+    fake.header <- data.frame(SITE = c(3), NAME = c("A new site"), stringsAsFactors=FALSE)
+    fake.body <- data.frame(ID = letters[1:4], Var1 = c(1, 1, 2, 1), Var2 = c(8.2, 9.1259, 10, 8.155), Var3 = c(8.2, 9.1259, 10, 8.155), stringsAsFactors=FALSE)
+
+    fake1 <- list(fake.header, fake.body)
+
+    # fake1 passes the checks
+    check.constraints(fake1, test.desc)
+
+
+    # make more fake data
+
+    fake.header <- data.frame(SITE = c(3), NAME = c("Another new site"), stringsAsFactors=FALSE)
+    fake.body <- data.frame(ID = c("a", "b", "C", "d"), Var1 = c(1, 5, 2, 8), Var2 = c(5.2, 9.1259, 10, 12.155), Var3 = c(8.2, 9.1259, 10, 8.155), stringsAsFactors=FALSE)
+
+    fake2 <- list(fake.header, fake.body)
+
+    # fake2 fails the checks
+    check.constraints(fake2, test.desc)
+
+    # write to text files
+    # NOTE: does not enforce constraints - it's currently up to the user to check them
+    # NOTE: check decimal places, column widths, justification in text file
+    write.fmf(fake1, test.desc, "fake1.txt")
+    write.fmf(fake2, test.desc, "fake2.txt")
+
+```
+
+# APEX Examples 
+
+I have written structures descriptions for three APEX input files.
+
+- TILLCOM.DAT
+- CROP.DAT
+- OPC 
+- APEXRUN.DAT 
+
+These produce files that APEX1605 reads without error.
+
+```{r apexexample, echo=TRUE}
+
+
+#### DEFINING AND READING FORMATTED FILES
+
+# APEXRUN.DAT 
+
+    # set up description
+    source("objects/apexrun.dat.R")
+
+    # look at the description format
+    print.section(apexrun.desc, 1)
+
+    # import an existing file
+    apexrun.apex <- read.fmf(filename="data/APEXRUN.DAT", desc=apexrun.desc)
+
+    # write the file back out for comparison with the original
+    write.fmf(apexrun.apex, apexrun.desc, "apexrunout.txt")
+
+
+# CROP.DAT
+
+    source("objects/crop.dat.R")
+    crop.apex <- read.fmf(filename="data/CROP1203.DAT", desc=crop.desc)
+    write.fmf(crop.apex, crop.desc, "cropout.txt")
+
+
+# TILLCOM.DAT
+
+    source("objects/tillcom.dat.R")
+    tillcom.apex <- read.fmf(filename="data/TILLCOM.DAT", desc=tillcom.desc)
+    write.fmf(tillcom.apex, tillcom.desc, "tillcomout.txt")
+
+
+# OPC
+
+    source("objects/opc.R")
+    opc.apex <- read.fmf(filename="data/Hays2.OPC", desc=opc.desc)
+    write.fmf(opc.apex, opc.desc, "opcout.txt")
+
+
+
+```
+
+
+## Working with R objects
+
+The APEX fixed-format files are imported into R as lists, with header rows and body as separate list items. The `CROP.DAT` file has two different header rows and a body section. The body section has a different number of fields than the headers, because the last column of the body doesn't have a column header, but the column names can be added manually. The required spacer columns also don't have column names.
+
+```{r cropfile, echo=TRUE}
+
+    crop.params <- crop.apex[[3]] # extract the body
+
+    crop.colnames <- c(as.character(crop.apex[[2]][1, ]), "CropName")
+    crop.colnames[c(1, 2, 3)] <- c("spacer1", "CropNumber", "spacer2")
+
+    colnames(crop.params) <- crop.colnames
+    rm(crop.colnames)
+
+```
+
+Now the parameters can be manipulated, rows added and deleted, and so on. To export the modified file, restore it to its position in the R object.
+
+```{r cropfileout, echo=TRUE}
+
+    crop.apex.new <- crop.apex
+    crop.apex.new[[3]] <- crop.params
+    write.fmf(crop.apex.new, crop.desc, "cropout-new.txt")
+```
+
+
+# Tasks and Thoughts
+
+- create desc files for the remaining APEX input files
+- simplify/streamline the creation of desc files
+- possibly use S3 methods
+
+The terminal row is currently a text string (see for example the terminal line of APEXRUN.DAT), so the code won't recognize a slightly different version. If it isn't recognized, then it is added to the data as a regular row, and written to the output as a regular row, and the terminal row appended. If this happens, it shouldn't interfere with running of any files in APEX, because the extra terminal row will be ignored.
+

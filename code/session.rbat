@@ -1,0 +1,10 @@
+### libraries
+
+
+
+### local functions
+
+# load R files 
+for(i in list.files(pattern="\\.R$", path="func", full.names=TRUE)) source(i)
+rm(i)
+
