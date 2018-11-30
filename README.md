@@ -20,3 +20,4 @@ Capabilities include:
 - checking whether fields satisfy constraints.
 - writing R objects to formatted text files.
 
+`apexfiles.Rmd` elaborates on the approach and current implementation, and provides both artificial and real examples.
